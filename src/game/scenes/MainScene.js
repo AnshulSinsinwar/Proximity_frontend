@@ -31,8 +31,27 @@ export default class MainScene extends Phaser.Scene {
         this.playerName = playerData.name;
         this.avatarFile = playerData.avatarFile;
 
-        // Load user's selected avatar spritesheet (3 columns x 4 rows, 32x32 each frame)
-        // Row order: down, left, right, up (3 frames each)
+        // Load ALL avatar spritesheets so other players' avatars show correctly
+        const allAvatars = [
+            'Male 01-1.png',
+            'Male 02-3.png',
+            'Male 03-1.png',
+            'Male 04-4.png',
+            'Male 08-1.png',
+            'su1 Student male 06.png',
+            'su2 Student fmale 10.png'
+        ];
+        
+        allAvatars.forEach(avatarFile => {
+            // Use avatar filename (without extension) as key
+            const key = avatarFile.replace('.png', '');
+            this.load.spritesheet(key, `/assets/${avatarFile}`, { 
+                frameWidth: 32, 
+                frameHeight: 32 
+            });
+        });
+        
+        // Also load with 'avatar' key for current player backwards compatibility
         this.load.spritesheet('avatar', `/assets/${this.avatarFile}`, { 
             frameWidth: 32, 
             frameHeight: 32 
@@ -104,9 +123,21 @@ export default class MainScene extends Phaser.Scene {
     }
 
     createAnimations() {
-        if (this.anims.exists('walk-down')) return;
+        if (this.anims.exists('avatar-walk-down')) return;
         
         const anims = this.anims;
+        
+        // All available avatar keys
+        const avatarKeys = [
+            'avatar', // fallback
+            'Male 01-1',
+            'Male 02-3',
+            'Male 03-1',
+            'Male 04-4',
+            'Male 08-1',
+            'su1 Student male 06',
+            'su2 Student fmale 10'
+        ];
         
         // 3 columns x 4 rows spritesheet
         // Row 0 (frames 0-2): walk down
@@ -114,29 +145,33 @@ export default class MainScene extends Phaser.Scene {
         // Row 2 (frames 6-8): walk right
         // Row 3 (frames 9-11): walk up
         
-        anims.create({
-            key: 'walk-down',
-            frames: anims.generateFrameNumbers('avatar', { start: 0, end: 2 }),
-            frameRate: 8,
-            repeat: -1
-        });
-        anims.create({
-            key: 'walk-left',
-            frames: anims.generateFrameNumbers('avatar', { start: 3, end: 5 }),
-            frameRate: 8,
-            repeat: -1
-        });
-        anims.create({
-            key: 'walk-right',
-            frames: anims.generateFrameNumbers('avatar', { start: 6, end: 8 }),
-            frameRate: 8,
-            repeat: -1
-        });
-        anims.create({
-            key: 'walk-up',
-            frames: anims.generateFrameNumbers('avatar', { start: 9, end: 11 }),
-            frameRate: 8,
-            repeat: -1
+        avatarKeys.forEach(avatarKey => {
+            if (!this.textures.exists(avatarKey)) return;
+            
+            anims.create({
+                key: `${avatarKey}-walk-down`,
+                frames: anims.generateFrameNumbers(avatarKey, { start: 0, end: 2 }),
+                frameRate: 8,
+                repeat: -1
+            });
+            anims.create({
+                key: `${avatarKey}-walk-left`,
+                frames: anims.generateFrameNumbers(avatarKey, { start: 3, end: 5 }),
+                frameRate: 8,
+                repeat: -1
+            });
+            anims.create({
+                key: `${avatarKey}-walk-right`,
+                frames: anims.generateFrameNumbers(avatarKey, { start: 6, end: 8 }),
+                frameRate: 8,
+                repeat: -1
+            });
+            anims.create({
+                key: `${avatarKey}-walk-up`,
+                frames: anims.generateFrameNumbers(avatarKey, { start: 9, end: 11 }),
+                frameRate: 8,
+                repeat: -1
+            });
         });
     }
 
@@ -187,10 +222,21 @@ export default class MainScene extends Phaser.Scene {
 
         const startX = playerInfo.x || 400;
         const startY = playerInfo.y || 300;
+        
+        // Get the player's avatar - use their avatar or fallback to default
+        let avatarKey = 'avatar'; // fallback
+        if (playerInfo.avatar) {
+            // Remove .png if present and use as key
+            const key = playerInfo.avatar.replace('.png', '');
+            if (this.textures.exists(key)) {
+                avatarKey = key;
+            }
+        }
 
-        const otherPlayer = this.add.sprite(startX, startY, 'avatar');
+        const otherPlayer = this.add.sprite(startX, startY, avatarKey);
         otherPlayer.setOrigin(0.5, 0.5);
         otherPlayer.playerId = playerId;
+        otherPlayer.avatarKey = avatarKey; // Store for animations
         otherPlayer.setDepth(10);
         
         // Add name text above other player (backend uses 'username' not 'name')
@@ -208,7 +254,7 @@ export default class MainScene extends Phaser.Scene {
         otherPlayer.nameText = nameText;
         
         this.networkEntities[playerId] = otherPlayer;
-        console.log('Added other player:', playerId, playerName);
+        console.log('Added other player:', playerId, playerName, 'avatar:', avatarKey);
     }
 
     setupSocketListeners() {
@@ -256,9 +302,10 @@ export default class MainScene extends Phaser.Scene {
                     otherPlayer.nameText.setPosition(playerInfo.x, playerInfo.y - 18);
                 }
                 
-                // Play animation based on direction
+                // Play animation based on direction using player's avatar key
                 if (playerInfo.direction) {
-                    const animKey = 'walk-' + playerInfo.direction;
+                    const avatarKey = otherPlayer.avatarKey || 'avatar';
+                    const animKey = `${avatarKey}-walk-${playerInfo.direction}`;
                     if (this.anims.exists(animKey)) {
                         otherPlayer.anims.play(animKey, true);
                     }
@@ -289,24 +336,24 @@ export default class MainScene extends Phaser.Scene {
         
         if (this.cursors.left.isDown || this.wasd.left.isDown) {
             this.player.setVelocityX(-speed);
-            this.player.anims.play('walk-left', true);
+            this.player.anims.play('avatar-walk-left', true);
             direction = 'left';
             moved = true;
         } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
             this.player.setVelocityX(speed);
-            this.player.anims.play('walk-right', true);
+            this.player.anims.play('avatar-walk-right', true);
             direction = 'right';
             moved = true;
         }
 
         if (this.cursors.up.isDown || this.wasd.up.isDown) {
             this.player.setVelocityY(-speed);
-            this.player.anims.play('walk-up', true);
+            this.player.anims.play('avatar-walk-up', true);
             direction = 'up';
             moved = true;
         } else if (this.cursors.down.isDown || this.wasd.down.isDown) {
             this.player.setVelocityY(speed);
-            this.player.anims.play('walk-down', true);
+            this.player.anims.play('avatar-walk-down', true);
             direction = 'down';
             moved = true;
         }
@@ -328,7 +375,8 @@ export default class MainScene extends Phaser.Scene {
     }
 
     checkProximity() {
-        const threshold = 100;
+        // 2 tiles = 32 pixels (each tile is 16x16)
+        const threshold = 32;
         const nearbyPlayers = [];
 
         Object.keys(this.networkEntities).forEach(id => {
