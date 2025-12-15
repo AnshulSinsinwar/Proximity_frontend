@@ -6,12 +6,19 @@ import Phaser from 'phaser';
 import MainScene from '../game/scenes/MainScene';
 import VideoChatOverlay from './VideoChatOverlay';
 
-const GameMap = () => {
+const GameMap = ({ playerName, avatarFile, avatarId }) => {
     const gameContainerRef = useRef(null);
     const gameRef = useRef(null);
 
     useEffect(() => {
         if (gameRef.current) return;
+
+        // Store player data globally for Phaser to access
+        window.PLAYER_DATA = {
+            name: playerName,
+            avatarFile: avatarFile,
+            avatarId: avatarId
+        };
 
         const config = {
             type: Phaser.AUTO,
@@ -39,8 +46,9 @@ const GameMap = () => {
                 gameRef.current.destroy(true);
                 gameRef.current = null;
             }
+            delete window.PLAYER_DATA;
         };
-    }, []);
+    }, [playerName, avatarFile, avatarId]);
 
     return (
         <div style={{ position: 'relative', width: '100%', height: '100%' }}>

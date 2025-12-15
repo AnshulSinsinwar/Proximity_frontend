@@ -6,8 +6,11 @@ export default class MainScene extends Phaser.Scene {
         super('MainScene');
         this.cursors = null;
         this.player = null;
+        this.playerNameText = null;
         this.networkEntities = {};
         this.connected = false;
+        this.playerName = '';
+        this.avatarFile = '';
     }
 
     preload() {
@@ -23,9 +26,14 @@ export default class MainScene extends Phaser.Scene {
             this.load.image(ts, `/assets/${ts}.png`);
         });
 
-        // Load user's avatar spritesheet (3 columns x 4 rows, 32x32 each frame)
+        // Get player data from React
+        const playerData = window.PLAYER_DATA || { name: 'Player', avatarFile: 'Male 01-1.png' };
+        this.playerName = playerData.name;
+        this.avatarFile = playerData.avatarFile;
+
+        // Load user's selected avatar spritesheet (3 columns x 4 rows, 32x32 each frame)
         // Row order: down, left, right, up (3 frames each)
-        this.load.spritesheet('avatar', '/assets/Male 01-1.png', { 
+        this.load.spritesheet('avatar', `/assets/${this.avatarFile}`, { 
             frameWidth: 32, 
             frameHeight: 32 
         });
@@ -146,6 +154,18 @@ export default class MainScene extends Phaser.Scene {
         this.cameras.main.setZoom(2);
         this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
         
+        // Create player name text above avatar
+        this.playerNameText = this.add.text(startX, startY - 20, this.playerName, {
+            fontSize: '12px',
+            fontFamily: 'Arial',
+            color: '#ffffff',
+            stroke: '#000000',
+            strokeThickness: 3,
+            align: 'center'
+        });
+        this.playerNameText.setOrigin(0.5, 1);
+        this.playerNameText.setDepth(11);
+        
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys({
             up: Phaser.Input.Keyboard.KeyCodes.W,
@@ -204,6 +224,11 @@ export default class MainScene extends Phaser.Scene {
         if (!this.player) return;
         this.handleMovement();
         this.checkProximity();
+        
+        // Update name position above player
+        if (this.playerNameText) {
+            this.playerNameText.setPosition(this.player.x, this.player.y - 18);
+        }
     }
 
     handleMovement() {
