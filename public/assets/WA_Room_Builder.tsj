@@ -1,0 +1,27 @@
+{
+  "columns": 50,
+  "image": "WA_Room_Builder.png",
+  "imageheight": 1280,
+  "imagewidth": 800,
+  "margin": 0,
+  "name": "WA_Room_Builder",
+  "spacing": 0,
+  "tilecount": 4000,
+  "tiledversion": "1.11.2",
+  "tileheight": 16,
+  "tiles": [
+    {
+      "id": 707,
+      "properties": [
+        {
+          "name": "collides",
+          "type": "bool",
+          "value": true
+        }
+      ]
+    }
+  ],
+  "tilewidth": 16,
+  "type": "tileset",
+  "version": "1.10"
+}

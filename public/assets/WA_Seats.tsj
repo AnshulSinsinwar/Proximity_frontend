@@ -1,0 +1,15 @@
+{
+  "columns": 26,
+  "image": "WA_Seats.png",
+  "imageheight": 448,
+  "imagewidth": 416,
+  "margin": 0,
+  "name": "WA_Seats",
+  "spacing": 0,
+  "tilecount": 728,
+  "tiledversion": "1.11.2",
+  "tileheight": 16,
+  "tilewidth": 16,
+  "type": "tileset",
+  "version": "1.10"
+}

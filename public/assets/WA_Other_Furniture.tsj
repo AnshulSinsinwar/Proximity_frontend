@@ -1,0 +1,15 @@
+{
+  "columns": 24,
+  "image": "WA_Other_Furniture.png",
+  "imageheight": 416,
+  "imagewidth": 384,
+  "margin": 0,
+  "name": "WA_Other_Furniture",
+  "spacing": 0,
+  "tilecount": 624,
+  "tiledversion": "1.11.2",
+  "tileheight": 16,
+  "tilewidth": 16,
+  "type": "tileset",
+  "version": "1.10"
+}

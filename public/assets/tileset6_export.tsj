@@ -1,0 +1,15 @@
+{
+  "columns": 20,
+  "image": "tileset6_export.png",
+  "imageheight": 320,
+  "imagewidth": 320,
+  "margin": 0,
+  "name": "tileset6_export",
+  "spacing": 0,
+  "tilecount": 400,
+  "tiledversion": "1.11.2",
+  "tileheight": 16,
+  "tilewidth": 16,
+  "type": "tileset",
+  "version": "1.10"
+}
