@@ -11,6 +11,8 @@ export default class MainScene extends Phaser.Scene {
         this.connected = false;
         this.playerName = '';
         this.avatarFile = '';
+        this.roomZones = []; // Trigger zones for rooms
+        this.currentRoom = null; // Current room player is in
     }
 
     preload() {
@@ -118,6 +120,19 @@ export default class MainScene extends Phaser.Scene {
                 }
             }
         });
+
+        // Load Trigger zones (conference_room, Meeting_Room, etc.)
+        const triggersLayer = this.map.getObjectLayer('Triggers');
+        if (triggersLayer && triggersLayer.objects) {
+            this.roomZones = triggersLayer.objects.map(obj => ({
+                name: obj.name,
+                x: obj.x,
+                y: obj.y,
+                width: obj.width,
+                height: obj.height
+            }));
+            console.log('✅ Loaded room zones:', this.roomZones.map(z => z.name));
+        }
 
         this.physics.world.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
     }
@@ -320,6 +335,7 @@ export default class MainScene extends Phaser.Scene {
         if (!this.player) return;
         this.handleMovement();
         this.checkProximity();
+        this.checkRoomZone(); // Check if in meeting room
         
         // Update name position above player
         if (this.playerNameText) {
@@ -389,5 +405,29 @@ export default class MainScene extends Phaser.Scene {
         });
 
         window.dispatchEvent(new CustomEvent('proximity-update', { detail: nearbyPlayers }));
+    }
+
+    checkRoomZone() {
+        const px = this.player.x;
+        const py = this.player.y;
+        
+        // Find which room zone the player is in
+        let inRoom = null;
+        for (const zone of this.roomZones) {
+            if (px >= zone.x && px <= zone.x + zone.width &&
+                py >= zone.y && py <= zone.y + zone.height) {
+                inRoom = zone.name;
+                break;
+            }
+        }
+        
+        // Dispatch event if room changed
+        if (inRoom !== this.currentRoom) {
+            this.currentRoom = inRoom;
+            console.log('🚪 Room changed:', inRoom || 'Outside');
+            window.dispatchEvent(new CustomEvent('room-change', { 
+                detail: { room: inRoom } 
+            }));
+        }
     }
 }
