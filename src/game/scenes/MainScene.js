@@ -48,6 +48,11 @@ export default class MainScene extends Phaser.Scene {
         SocketManager.connect();
         this.setupSocketListeners();
         
+        // Emit player join with name and avatar
+        setTimeout(() => {
+            SocketManager.emitJoin(this.playerName, this.avatarFile);
+        }, 500); // Small delay to ensure connection
+        
         // Camera Zoom (Mouse Wheel) - FIXED DIRECTION
         this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
             // Scroll UP (negative deltaY) = zoom IN, Scroll DOWN (positive deltaY) = zoom OUT
@@ -176,43 +181,87 @@ export default class MainScene extends Phaser.Scene {
     }
 
     addOtherPlayer(playerInfo) {
-        if (this.networkEntities[playerInfo.playerId]) return;
+        // Backend uses 'id' not 'playerId'
+        const playerId = playerInfo.id || playerInfo.playerId;
+        if (!playerId || this.networkEntities[playerId]) return;
 
-        const otherPlayer = this.add.sprite(playerInfo.x, playerInfo.y, 'avatar');
+        const startX = playerInfo.x || 400;
+        const startY = playerInfo.y || 300;
+
+        const otherPlayer = this.add.sprite(startX, startY, 'avatar');
         otherPlayer.setOrigin(0.5, 0.5);
-        otherPlayer.playerId = playerInfo.playerId;
+        otherPlayer.playerId = playerId;
         otherPlayer.setDepth(10);
-        this.networkEntities[playerInfo.playerId] = otherPlayer;
+        
+        // Add name text above other player (backend uses 'username' not 'name')
+        const playerName = playerInfo.username || playerInfo.name || 'Player';
+        const nameText = this.add.text(startX, startY - 18, playerName, {
+            fontSize: '12px',
+            fontFamily: 'Arial',
+            color: '#ffff00', // Yellow for other players
+            stroke: '#000000',
+            strokeThickness: 3,
+            align: 'center'
+        });
+        nameText.setOrigin(0.5, 1);
+        nameText.setDepth(11);
+        otherPlayer.nameText = nameText;
+        
+        this.networkEntities[playerId] = otherPlayer;
+        console.log('Added other player:', playerId, playerName);
     }
 
     setupSocketListeners() {
         SocketManager.onCurrentPlayers((players) => {
+            console.log('Received current players:', players);
+            // Backend sends object with socket id as key
             Object.keys(players).forEach((id) => {
-                if (players[id].playerId === SocketManager.socket.id) {
+                const playerData = players[id];
+                // Skip ourselves
+                if (id === SocketManager.socket?.id || playerData.id === SocketManager.socket?.id) {
                     if (this.player) this.player.playerId = id;
                 } else {
-                    this.addOtherPlayer(players[id]);
+                    this.addOtherPlayer(playerData);
                 }
             });
         });
 
         SocketManager.onNewPlayer((playerInfo) => {
+            console.log('New player joined:', playerInfo);
+            // Skip if it's us
+            if (playerInfo.id === SocketManager.socket?.id) return;
             this.addOtherPlayer(playerInfo);
         });
 
         SocketManager.onPlayerDisconnected((playerId) => {
             if (this.networkEntities[playerId]) {
+                // Destroy name text too
+                if (this.networkEntities[playerId].nameText) {
+                    this.networkEntities[playerId].nameText.destroy();
+                }
                 this.networkEntities[playerId].destroy();
                 delete this.networkEntities[playerId];
             }
         });
 
         SocketManager.onPlayerMoved((playerInfo) => {
-            const otherPlayer = this.networkEntities[playerInfo.playerId];
+            // Backend uses 'id' not 'playerId'
+            const playerId = playerInfo.id || playerInfo.playerId;
+            const otherPlayer = this.networkEntities[playerId];
             if (otherPlayer) {
                 otherPlayer.setPosition(playerInfo.x, playerInfo.y);
-                if (playerInfo.anim) {
-                    otherPlayer.anims.play(playerInfo.anim, true);
+                
+                // Update name text position
+                if (otherPlayer.nameText) {
+                    otherPlayer.nameText.setPosition(playerInfo.x, playerInfo.y - 18);
+                }
+                
+                // Play animation based on direction
+                if (playerInfo.direction) {
+                    const animKey = 'walk-' + playerInfo.direction;
+                    if (this.anims.exists(animKey)) {
+                        otherPlayer.anims.play(animKey, true);
+                    }
                 } else {
                     otherPlayer.anims.stop();
                 }
@@ -272,7 +321,7 @@ export default class MainScene extends Phaser.Scene {
         const y = this.player.y;
         
         if (this.player.oldPosition && (x !== this.player.oldPosition.x || y !== this.player.oldPosition.y)) {
-            SocketManager.emitMove(x, y, direction);
+            SocketManager.emitMove(x, y, direction, this.playerName);
         }
         
         this.player.oldPosition = { x: this.player.x, y: this.player.y, direction: direction };
