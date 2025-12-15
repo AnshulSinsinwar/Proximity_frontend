@@ -46,6 +46,11 @@ const VideoChatOverlay = () => {
         };
     }, [peers.length]); // Re-run when peer count changes
 
+    // Don't render anything if no peers nearby
+    if (peers.length === 0) {
+        return null;
+    }
+
     return (
         <div style={{
             position: 'absolute',
