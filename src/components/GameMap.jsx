@@ -77,13 +77,15 @@ const GameMap = ({
     }, [playerName, avatarFile, avatarId, roomCode, roomName, token, isCreator, spawn]);
 
     return (
-        <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-            {/* Game Canvas */}
-            <div ref={gameContainerRef} style={{ width: '100%', height: '100%' }} />
+        <div style={styles.container}>
+            {/* Game Canvas - lower z-index */}
+            <div ref={gameContainerRef} style={styles.gameCanvas} />
+
+            {/* UI Overlays Layer - higher z-index */}
 
             {/* Room Info Banner */}
             <div style={styles.roomBanner}>
-                🏠 {roomName} • Code: <strong>{roomCode}</strong>
+                🏠 {roomName || 'Room'} • Code: <strong>{roomCode || 'N/A'}</strong>
             </div>
 
             {/* Video Chat Overlay */}
@@ -111,20 +113,35 @@ const GameMap = ({
 };
 
 const styles = {
+    container: {
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+    },
+    gameCanvas: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        zIndex: 1,
+    },
     roomBanner: {
         position: 'absolute',
         top: '15px',
         left: '50%',
         transform: 'translateX(-50%)',
-        background: 'rgba(0, 0, 0, 0.7)',
-        backdropFilter: 'blur(5px)',
+        background: 'rgba(0, 0, 0, 0.85)',
+        backdropFilter: 'blur(8px)',
         color: 'white',
-        padding: '10px 20px',
-        borderRadius: '20px',
+        padding: '12px 24px',
+        borderRadius: '25px',
         fontSize: '14px',
         fontFamily: "'Segoe UI', sans-serif",
-        zIndex: 1000,
-        boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+        zIndex: 9999,
+        border: '1px solid rgba(255,255,255,0.15)',
     }
 };
 

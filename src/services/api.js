@@ -1,9 +1,14 @@
 // API Service for Proximity Backend
-const BASE_URL = 'http://localhost:3000/api/v1';
+// Uses environment variable VITE_API_URL, falls back to localhost
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
-// Helper for API calls
+console.log('🌐 API Base URL:', BASE_URL);
+
+// Helper for API calls with detailed logging
 async function apiCall(endpoint, options = {}) {
     const url = `${BASE_URL}${endpoint}`;
+    console.log('📡 API Request:', options.method || 'GET', url);
+
     const config = {
         headers: {
             'Content-Type': 'application/json',
@@ -12,13 +17,39 @@ async function apiCall(endpoint, options = {}) {
         ...options,
     };
 
-    const response = await fetch(url, config);
-    const data = await response.json().catch(() => response.text());
-    
-    if (!response.ok) {
-        throw { status: response.status, error: data.error || data };
+    try {
+        const response = await fetch(url, config);
+
+        // Try to parse JSON, fallback to text
+        let data;
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            data = await response.text();
+        }
+
+        console.log('📡 API Response:', response.status, data);
+
+        if (!response.ok) {
+            const error = {
+                status: response.status,
+                error: typeof data === 'object' ? (data.error || data.message || JSON.stringify(data)) : data
+            };
+            console.error('❌ API Error:', error);
+            throw error;
+        }
+
+        return data;
+    } catch (err) {
+        // Network errors (no response from server)
+        if (err.name === 'TypeError' && err.message.includes('fetch')) {
+            console.error('🔴 Network Error: Cannot reach server at', url);
+            throw { status: 0, error: 'Cannot connect to server. Is the backend running?' };
+        }
+        // Re-throw API errors
+        throw err;
     }
-    return data;
 }
 
 // Add auth header helper
@@ -30,6 +61,7 @@ function withAuth(token) {
 
 // Create a new room (one room per user)
 export async function createRoom(username, avatar, roomName) {
+    console.log('🏠 Creating room:', { username, avatar, roomName });
     return apiCall('/rooms/create', {
         method: 'POST',
         body: JSON.stringify({ username, avatar, roomName }),
@@ -38,6 +70,7 @@ export async function createRoom(username, avatar, roomName) {
 
 // Join existing room by code
 export async function joinRoom(username, avatar, roomCode) {
+    console.log('🚪 Joining room:', { username, avatar, roomCode });
     return apiCall('/rooms/join', {
         method: 'POST',
         body: JSON.stringify({ username, avatar, roomCode }),

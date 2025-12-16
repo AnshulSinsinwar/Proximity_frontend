@@ -1,5 +1,10 @@
 import io from 'socket.io-client';
 
+// Socket server URL from environment variable, falls back to localhost
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
+
+console.log('🔌 Socket URL:', SOCKET_URL);
+
 class SocketManager {
     constructor() {
         this.socket = null;
@@ -8,8 +13,8 @@ class SocketManager {
     }
 
     connect() {
-        // Connect to backend on port 3000
-        this.socket = io('http://localhost:3000');
+        // Connect to backend
+        this.socket = io(SOCKET_URL);
 
         this.socket.on('connect', () => {
             console.log('✅ Connected to socket server:', this.socket.id);
