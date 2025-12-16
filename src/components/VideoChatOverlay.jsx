@@ -10,47 +10,59 @@ const VideoChatOverlay = () => {
     const [isCameraOn, setIsCameraOn] = useState(true);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const [peers, setPeers] = useState([]);
+    const [cameraError, setCameraError] = useState(null);
 
-    // Start/stop media based on room entry
+    // Check if we should have media active (in room OR near peers)
+    const shouldHaveMedia = currentRoom || peers.length > 0;
+
+    // Start/stop media based on room OR peer proximity
     useEffect(() => {
         const startMedia = async () => {
-            if (currentRoom && !stream) {
+            if (shouldHaveMedia && !stream) {
                 try {
+                    console.log('📹 Requesting camera/mic access...');
                     const mediaStream = await navigator.mediaDevices.getUserMedia({
                         video: true,
                         audio: true
                     });
                     setStream(mediaStream);
+                    setCameraError(null);
+                    
                     if (localVideoRef.current) {
                         localVideoRef.current.srcObject = mediaStream;
+                        localVideoRef.current.play().catch(e => console.log('Video autoplay blocked:', e));
                     }
-                    console.log('📹 Media started for room:', currentRoom);
+                    console.log('✅ Camera/mic started');
                 } catch (err) {
                     console.error("❌ Error accessing media devices:", err);
+                    setCameraError(err.name === 'NotAllowedError' 
+                        ? 'Camera blocked. Click 🔒 in address bar to allow.'
+                        : err.name === 'NotFoundError'
+                        ? 'No camera found'
+                        : 'Camera error: ' + err.message);
                 }
             }
         };
 
         const stopMedia = () => {
-            if (!currentRoom && stream) {
+            if (!shouldHaveMedia && stream) {
                 stream.getTracks().forEach(track => track.stop());
                 setStream(null);
                 if (localVideoRef.current) {
                     localVideoRef.current.srcObject = null;
                 }
-                // Also stop screen share
                 if (screenStream) {
                     screenStream.getTracks().forEach(track => track.stop());
                     setScreenStream(null);
                     setIsScreenSharing(false);
                 }
-                console.log('📹 Media stopped - left room');
+                console.log('📹 Media stopped - no room/peers');
             }
         };
 
         startMedia();
         stopMedia();
-    }, [currentRoom, stream, screenStream]);
+    }, [shouldHaveMedia, stream, screenStream]);
 
     // Listen for room changes from Phaser
     useEffect(() => {
@@ -61,7 +73,9 @@ const VideoChatOverlay = () => {
         };
 
         const handleProximity = (event) => {
-            setPeers(event.detail);
+            const nearbyPeers = event.detail;
+            console.log('👥 Nearby peers:', nearbyPeers.length);
+            setPeers(nearbyPeers);
         };
 
         window.addEventListener('room-change', handleRoomChange);
@@ -101,17 +115,33 @@ const VideoChatOverlay = () => {
         }
     };
 
+    // Retry camera access
+    const retryCamera = async () => {
+        setCameraError(null);
+        try {
+            const mediaStream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: true
+            });
+            setStream(mediaStream);
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = mediaStream;
+                localVideoRef.current.play().catch(e => console.log('Play error:', e));
+            }
+        } catch (err) {
+            setCameraError('Camera access denied');
+        }
+    };
+
     // Toggle screen share
     const toggleScreenShare = async () => {
         if (isScreenSharing) {
-            // Stop screen sharing
             if (screenStream) {
                 screenStream.getTracks().forEach(track => track.stop());
                 setScreenStream(null);
             }
             setIsScreenSharing(false);
         } else {
-            // Start screen sharing
             try {
                 const displayStream = await navigator.mediaDevices.getDisplayMedia({
                     video: true,
@@ -120,7 +150,6 @@ const VideoChatOverlay = () => {
                 setScreenStream(displayStream);
                 setIsScreenSharing(true);
 
-                // Listen for when user stops sharing via browser UI
                 displayStream.getVideoTracks()[0].onended = () => {
                     setScreenStream(null);
                     setIsScreenSharing(false);
@@ -131,19 +160,19 @@ const VideoChatOverlay = () => {
         }
     };
 
-    // Don't render if not in a meeting room and no nearby peers
-    if (!currentRoom && peers.length === 0) {
+    // Don't render if not in a meeting room AND no nearby peers
+    if (!shouldHaveMedia) {
         return null;
     }
 
     return (
         <div style={styles.container}>
-            {/* Room Banner */}
-            {currentRoom && (
-                <div style={styles.roomBanner}>
-                    📍 {currentRoom.replace('_', ' ')}
-                </div>
-            )}
+            {/* Status Banner */}
+            <div style={styles.roomBanner}>
+                {currentRoom 
+                    ? `📍 ${currentRoom.replace('_', ' ')}` 
+                    : `👥 ${peers.length} nearby`}
+            </div>
 
             {/* Video Grid */}
             <div style={styles.videoGrid}>
@@ -151,7 +180,6 @@ const VideoChatOverlay = () => {
                 {isScreenSharing && screenStream && (
                     <div style={styles.screenCard}>
                         <video
-                            ref={screenVideoRef}
                             autoPlay
                             playsInline
                             style={styles.screenVideo}
@@ -163,16 +191,24 @@ const VideoChatOverlay = () => {
 
                 {/* Local Video */}
                 <div style={styles.videoCard}>
-                    <video
-                        ref={localVideoRef}
-                        autoPlay
-                        muted
-                        playsInline
-                        style={{
-                            ...styles.video,
-                            opacity: isCameraOn ? 1 : 0.3
-                        }}
-                    />
+                    {cameraError ? (
+                        <div style={styles.errorBox} onClick={retryCamera}>
+                            <span style={{ fontSize: '24px' }}>📷</span>
+                            <div style={{ fontSize: '10px', marginTop: '5px' }}>{cameraError}</div>
+                            <div style={{ fontSize: '9px', color: '#4a90d9' }}>Tap to retry</div>
+                        </div>
+                    ) : (
+                        <video
+                            ref={localVideoRef}
+                            autoPlay
+                            muted
+                            playsInline
+                            style={{
+                                ...styles.video,
+                                opacity: isCameraOn ? 1 : 0.3
+                            }}
+                        />
+                    )}
                     <div style={styles.videoLabel}>You</div>
                 </div>
 
@@ -183,15 +219,14 @@ const VideoChatOverlay = () => {
                             <span style={{ fontSize: '32px' }}>👤</span>
                         </div>
                         <div style={styles.videoLabel}>
-                            {peerId.substring(0, 8)}...
+                            {typeof peerId === 'string' ? peerId.substring(0, 8) + '...' : 'Peer'}
                         </div>
                     </div>
                 ))}
             </div>
 
-            {/* Media Controls - Always visible when in room or with peers */}
+            {/* Media Controls */}
             <div style={styles.controls}>
-                {/* Mic Toggle */}
                 <button
                     onClick={toggleMic}
                     style={{
@@ -203,7 +238,6 @@ const VideoChatOverlay = () => {
                     {isMicOn ? '🎤' : '🔇'}
                 </button>
 
-                {/* Camera Toggle */}
                 <button
                     onClick={toggleCamera}
                     style={{
@@ -215,7 +249,6 @@ const VideoChatOverlay = () => {
                     {isCameraOn ? '📹' : '📷'}
                 </button>
 
-                {/* Screen Share Toggle */}
                 <button
                     onClick={toggleScreenShare}
                     style={{
@@ -227,7 +260,6 @@ const VideoChatOverlay = () => {
                     🖥️
                 </button>
 
-                {/* Full Screen (placeholder for now) */}
                 <button
                     onClick={() => {
                         if (document.fullscreenElement) {
@@ -255,7 +287,7 @@ const styles = {
         flexDirection: 'column',
         alignItems: 'flex-end',
         gap: '10px',
-        zIndex: 1000,
+        zIndex: 9999,
     },
     roomBanner: {
         background: 'rgba(74, 144, 217, 0.9)',
@@ -310,6 +342,20 @@ const styles = {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    errorBox: {
+        width: '100%',
+        height: '100px',
+        background: 'rgba(231, 76, 60, 0.2)',
+        borderRadius: '8px',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#e74c3c',
+        cursor: 'pointer',
+        textAlign: 'center',
+        padding: '5px',
     },
     videoLabel: {
         color: 'white',
