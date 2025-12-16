@@ -13,14 +13,23 @@ export default class MainScene extends Phaser.Scene {
         this.avatarFile = '';
         this.roomZones = []; // Trigger zones for rooms
         this.currentRoom = null; // Current room player is in
+        this.inKanbanZone = false; // Track if player is near whiteboard
+
+        // Whiteboard zone coordinates (center area with whiteboard)
+        this.whiteboardZone = {
+            x: 540,
+            y: 100,
+            width: 80,
+            height: 80
+        };
     }
 
     preload() {
         this.load.tilemapTiledJSON('map', '/assets/Proximity-embedded.tmj');
-        
+
         const tilesets = [
-            'WA_Decoration', 'WA_Exterior', 'WA_Miscellaneous', 
-            'WA_Other_Furniture', 'WA_Room_Builder', 'WA_Seats', 
+            'WA_Decoration', 'WA_Exterior', 'WA_Miscellaneous',
+            'WA_Other_Furniture', 'WA_Room_Builder', 'WA_Seats',
             'WA_Tables', 'tileset1-repositioning', 'tileset1', 'tileset6_export'
         ];
 
@@ -43,20 +52,20 @@ export default class MainScene extends Phaser.Scene {
             'su1 Student male 06.png',
             'su2 Student fmale 10.png'
         ];
-        
+
         allAvatars.forEach(avatarFile => {
             // Use avatar filename (without extension) as key
             const key = avatarFile.replace('.png', '');
-            this.load.spritesheet(key, `/assets/${avatarFile}`, { 
-                frameWidth: 32, 
-                frameHeight: 32 
+            this.load.spritesheet(key, `/assets/${avatarFile}`, {
+                frameWidth: 32,
+                frameHeight: 32
             });
         });
-        
+
         // Also load with 'avatar' key for current player backwards compatibility
-        this.load.spritesheet('avatar', `/assets/${this.avatarFile}`, { 
-            frameWidth: 32, 
-            frameHeight: 32 
+        this.load.spritesheet('avatar', `/assets/${this.avatarFile}`, {
+            frameWidth: 32,
+            frameHeight: 32
         });
     }
 
@@ -64,16 +73,27 @@ export default class MainScene extends Phaser.Scene {
         this.createMap();
         this.createAnimations();
         this.createPlayer(); // Offline spawn
-        
+
         // Connect to IO
         SocketManager.connect();
         this.setupSocketListeners();
-        
-        // Emit player join with name and avatar
+
+        // Get room data if available
+        const roomData = window.ROOM_DATA;
+
+        // Emit player join with room code if available
         setTimeout(() => {
-            SocketManager.emitJoin(this.playerName, this.avatarFile);
-        }, 500); // Small delay to ensure connection
-        
+            if (roomData && roomData.roomCode) {
+                SocketManager.emitJoinWithRoomCode(
+                    this.playerName,
+                    this.avatarFile,
+                    roomData.roomCode
+                );
+            } else {
+                SocketManager.emitJoin(this.playerName, this.avatarFile);
+            }
+        }, 500);
+
         // Camera Zoom (Mouse Wheel) - FIXED DIRECTION
         this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY, deltaZ) => {
             // Scroll UP (negative deltaY) = zoom IN, Scroll DOWN (positive deltaY) = zoom OUT
@@ -107,12 +127,12 @@ export default class MainScene extends Phaser.Scene {
             const layer = this.map.createLayer(layerName, tilesetObjects, 0, 0);
             if (layer) {
                 this.createdLayers[layerName] = layer;
-                
+
                 // Enable collision on Walls layer (visible walls)
                 if (layerName === 'Walls') {
                     layer.setCollisionByExclusion([-1, 0]);
                 }
-                
+
                 // Enable collision on Collide layer (invisible collision shapes)
                 if (layerName === 'Collide') {
                     layer.setCollisionByExclusion([-1, 0]);
@@ -139,9 +159,9 @@ export default class MainScene extends Phaser.Scene {
 
     createAnimations() {
         if (this.anims.exists('avatar-walk-down')) return;
-        
+
         const anims = this.anims;
-        
+
         // All available avatar keys
         const avatarKeys = [
             'avatar', // fallback
@@ -153,16 +173,16 @@ export default class MainScene extends Phaser.Scene {
             'su1 Student male 06',
             'su2 Student fmale 10'
         ];
-        
+
         // 3 columns x 4 rows spritesheet
         // Row 0 (frames 0-2): walk down
         // Row 1 (frames 3-5): walk left  
         // Row 2 (frames 6-8): walk right
         // Row 3 (frames 9-11): walk up
-        
+
         avatarKeys.forEach(avatarKey => {
             if (!this.textures.exists(avatarKey)) return;
-            
+
             anims.create({
                 key: `${avatarKey}-walk-down`,
                 frames: anims.generateFrameNumbers(avatarKey, { start: 0, end: 2 }),
@@ -208,7 +228,7 @@ export default class MainScene extends Phaser.Scene {
         this.cameras.main.startFollow(this.player);
         this.cameras.main.setZoom(2);
         this.cameras.main.setBounds(0, 0, this.map.widthInPixels, this.map.heightInPixels);
-        
+
         // Create player name text above avatar
         this.playerNameText = this.add.text(startX, startY - 20, this.playerName, {
             fontSize: '12px',
@@ -220,7 +240,7 @@ export default class MainScene extends Phaser.Scene {
         });
         this.playerNameText.setOrigin(0.5, 1);
         this.playerNameText.setDepth(11);
-        
+
         this.cursors = this.input.keyboard.createCursorKeys();
         this.wasd = this.input.keyboard.addKeys({
             up: Phaser.Input.Keyboard.KeyCodes.W,
@@ -237,7 +257,7 @@ export default class MainScene extends Phaser.Scene {
 
         const startX = playerInfo.x || 400;
         const startY = playerInfo.y || 300;
-        
+
         // Get the player's avatar - use their avatar or fallback to default
         let avatarKey = 'avatar'; // fallback
         if (playerInfo.avatar) {
@@ -253,7 +273,7 @@ export default class MainScene extends Phaser.Scene {
         otherPlayer.playerId = playerId;
         otherPlayer.avatarKey = avatarKey; // Store for animations
         otherPlayer.setDepth(10);
-        
+
         // Add name text above other player (backend uses 'username' not 'name')
         const playerName = playerInfo.username || playerInfo.name || 'Player';
         const nameText = this.add.text(startX, startY - 18, playerName, {
@@ -267,7 +287,7 @@ export default class MainScene extends Phaser.Scene {
         nameText.setOrigin(0.5, 1);
         nameText.setDepth(11);
         otherPlayer.nameText = nameText;
-        
+
         this.networkEntities[playerId] = otherPlayer;
         console.log('Added other player:', playerId, playerName, 'avatar:', avatarKey);
     }
@@ -311,12 +331,12 @@ export default class MainScene extends Phaser.Scene {
             const otherPlayer = this.networkEntities[playerId];
             if (otherPlayer) {
                 otherPlayer.setPosition(playerInfo.x, playerInfo.y);
-                
+
                 // Update name text position
                 if (otherPlayer.nameText) {
                     otherPlayer.nameText.setPosition(playerInfo.x, playerInfo.y - 18);
                 }
-                
+
                 // Play animation based on direction using player's avatar key
                 if (playerInfo.direction) {
                     const avatarKey = otherPlayer.avatarKey || 'avatar';
@@ -336,7 +356,8 @@ export default class MainScene extends Phaser.Scene {
         this.handleMovement();
         this.checkProximity();
         this.checkRoomZone(); // Check if in meeting room
-        
+        this.checkKanbanZone(); // Check if near whiteboard
+
         // Update name position above player
         if (this.playerNameText) {
             this.playerNameText.setPosition(this.player.x, this.player.y - 18);
@@ -346,10 +367,10 @@ export default class MainScene extends Phaser.Scene {
     handleMovement() {
         const speed = 150;
         this.player.setVelocity(0);
-        
+
         let moved = false;
         let direction = '';
-        
+
         if (this.cursors.left.isDown || this.wasd.left.isDown) {
             this.player.setVelocityX(-speed);
             this.player.anims.play('avatar-walk-left', true);
@@ -382,11 +403,11 @@ export default class MainScene extends Phaser.Scene {
 
         const x = this.player.x;
         const y = this.player.y;
-        
+
         if (this.player.oldPosition && (x !== this.player.oldPosition.x || y !== this.player.oldPosition.y)) {
             SocketManager.emitMove(x, y, direction, this.playerName);
         }
-        
+
         this.player.oldPosition = { x: this.player.x, y: this.player.y, direction: direction };
     }
 
@@ -398,7 +419,7 @@ export default class MainScene extends Phaser.Scene {
         Object.keys(this.networkEntities).forEach(id => {
             const other = this.networkEntities[id];
             const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, other.x, other.y);
-            
+
             if (dist < threshold) {
                 nearbyPlayers.push(id);
             }
@@ -410,7 +431,7 @@ export default class MainScene extends Phaser.Scene {
     checkRoomZone() {
         const px = this.player.x;
         const py = this.player.y;
-        
+
         // Find which room zone the player is in
         let inRoom = null;
         for (const zone of this.roomZones) {
@@ -420,13 +441,32 @@ export default class MainScene extends Phaser.Scene {
                 break;
             }
         }
-        
+
         // Dispatch event if room changed
         if (inRoom !== this.currentRoom) {
             this.currentRoom = inRoom;
             console.log('🚪 Room changed:', inRoom || 'Outside');
-            window.dispatchEvent(new CustomEvent('room-change', { 
-                detail: { room: inRoom } 
+            window.dispatchEvent(new CustomEvent('room-change', {
+                detail: { room: inRoom }
+            }));
+        }
+    }
+
+    checkKanbanZone() {
+        const px = this.player.x;
+        const py = this.player.y;
+        const zone = this.whiteboardZone;
+
+        // Check if player is in whiteboard zone
+        const inZone = px >= zone.x && px <= zone.x + zone.width &&
+            py >= zone.y && py <= zone.y + zone.height;
+
+        // Dispatch event if zone state changed
+        if (inZone !== this.inKanbanZone) {
+            this.inKanbanZone = inZone;
+            console.log('📋 Kanban zone:', inZone ? 'ENTERED' : 'LEFT');
+            window.dispatchEvent(new CustomEvent('kanban-zone-change', {
+                detail: { inZone }
             }));
         }
     }

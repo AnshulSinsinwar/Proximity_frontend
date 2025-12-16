@@ -3,6 +3,8 @@ import io from 'socket.io-client';
 class SocketManager {
     constructor() {
         this.socket = null;
+        this.roomCode = null;
+        this.token = null;
     }
 
     connect() {
@@ -10,47 +12,125 @@ class SocketManager {
         this.socket = io('http://localhost:3000');
 
         this.socket.on('connect', () => {
-            console.log('Connected to socket server:', this.socket.id);
+            console.log('✅ Connected to socket server:', this.socket.id);
+        });
+
+        this.socket.on('disconnect', () => {
+            console.log('❌ Disconnected from socket server');
+        });
+
+        this.socket.on('error', (error) => {
+            console.error('🔴 Socket error:', error);
         });
     }
 
-    // Send player info when joining (matches backend 'join-room' event)
+    disconnect() {
+        if (this.socket) {
+            this.socket.disconnect();
+            this.socket = null;
+        }
+    }
+
+    // Store credentials for reconnection
+    setCredentials(token, roomCode) {
+        this.token = token;
+        this.roomCode = roomCode;
+    }
+
+    // Join room with token (for authenticated users)
+    emitJoinWithToken(token) {
+        if (!this.socket) return;
+        this.socket.emit('join-room', { token });
+    }
+
+    // Join room with credentials (for new joins)
+    emitJoinWithRoomCode(username, avatar, roomCode) {
+        if (!this.socket) return;
+        this.socket.emit('join-room', { username, avatar, roomCode });
+    }
+
+    // Original join method (backwards compat, creates room)
     emitJoin(playerName, avatarFile) {
         if (!this.socket) return;
-        this.socket.emit('join-room', { 
-            username: playerName, 
+        this.socket.emit('join-room', {
+            username: playerName,
             avatar: avatarFile
         });
     }
 
-    // Send movement (matches backend 'player-move' event)
+    // Send movement
     emitMove(x, y, direction, name) {
         if (!this.socket) return;
         this.socket.emit('player-move', { x, y, direction, name });
     }
 
-    // Listen for new player joining (backend sends 'new-user-joined')
+    // Quit room
+    emitQuitRoom() {
+        if (!this.socket) return;
+        this.socket.emit('quit-room');
+    }
+
+    // ============ PLAYER EVENTS ============
+
+    onCurrentPlayers(callback) {
+        if (!this.socket) return;
+        this.socket.on('current-users', callback);
+    }
+
     onNewPlayer(callback) {
         if (!this.socket) return;
         this.socket.on('new-user-joined', callback);
     }
 
-    // Listen for player movement (backend sends 'player-moved')
     onPlayerMoved(callback) {
         if (!this.socket) return;
         this.socket.on('player-moved', callback);
     }
-    
-    // Listen for player disconnect (backend sends 'user-left')
+
     onPlayerDisconnected(callback) {
         if (!this.socket) return;
         this.socket.on('user-left', callback);
     }
-    
-    // Listen for current players list (backend sends 'current-users')
-    onCurrentPlayers(callback) {
+
+    // ============ ROOM EVENTS ============
+
+    onRoomChanged(callback) {
         if (!this.socket) return;
-        this.socket.on('current-users', callback);
+        this.socket.on('room-changed', callback);
+    }
+
+    onRoomAbolished(callback) {
+        if (!this.socket) return;
+        this.socket.on('room-abolished', callback);
+    }
+
+    // ============ TASK EVENTS ============
+
+    emitTaskCreate(roomCode, title, description) {
+        if (!this.socket) return;
+        this.socket.emit('task-create', { roomCode, title, description });
+    }
+
+    onTaskCreated(callback) {
+        if (!this.socket) return;
+        this.socket.on('task-created', callback);
+    }
+
+    onTaskUpdated(callback) {
+        if (!this.socket) return;
+        this.socket.on('task-updated', callback);
+    }
+
+    onTaskDeleted(callback) {
+        if (!this.socket) return;
+        this.socket.on('task-deleted', callback);
+    }
+
+    // ============ CLEANUP ============
+
+    removeAllListeners() {
+        if (!this.socket) return;
+        this.socket.removeAllListeners();
     }
 }
 
