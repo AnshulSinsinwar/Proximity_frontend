@@ -4,6 +4,7 @@ import MainScene from '../game/scenes/MainScene';
 import VideoChatOverlay from './VideoChatOverlay';
 import KanbanOverlay from './KanbanOverlay';
 import LogoutButton from './LogoutButton';
+import NotificationOverlay from './NotificationOverlay';
 
 const GameMap = ({
     playerName,
@@ -58,7 +59,7 @@ const GameMap = ({
         };
 
         gameRef.current = new Phaser.Game(config);
-
+        
         // Expose game globally so overlays can disable keyboard input
         window.PHASER_GAME = gameRef.current;
 
@@ -89,6 +90,9 @@ const GameMap = ({
             <div style={styles.roomBanner}>
                 🏠 {roomName || 'Room'} • Code: <strong>{roomCode || 'N/A'}</strong>
             </div>
+
+            {/* Notification Overlay - for join/leave toasts */}
+            <NotificationOverlay />
 
             {/* Kanban Toggle Button - Top Right */}
             <button

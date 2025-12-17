@@ -314,7 +314,11 @@ export default class MainScene extends Phaser.Scene {
             this.addOtherPlayer(playerInfo);
         });
 
-        SocketManager.onPlayerDisconnected((playerId) => {
+        SocketManager.onPlayerDisconnected((data) => {
+            // Backend sends either { socketId, username, ... } or just socketId string
+            const playerId = typeof data === 'object' ? data.socketId : data;
+            console.log('👋 Player disconnected:', playerId);
+
             if (this.networkEntities[playerId]) {
                 // Destroy name text too
                 if (this.networkEntities[playerId].nameText) {
@@ -322,6 +326,7 @@ export default class MainScene extends Phaser.Scene {
                 }
                 this.networkEntities[playerId].destroy();
                 delete this.networkEntities[playerId];
+                console.log('🗑️ Removed player from map:', playerId);
             }
         });
 
@@ -425,7 +430,13 @@ export default class MainScene extends Phaser.Scene {
             }
         });
 
-        window.dispatchEvent(new CustomEvent('proximity-update', { detail: nearbyPlayers }));
+        // Only dispatch if nearby players changed (prevents infinite logging)
+        const nearbyKey = nearbyPlayers.sort().join(',');
+        if (nearbyKey !== this.lastNearbyKey) {
+            this.lastNearbyKey = nearbyKey;
+            console.log('👥 Nearby peers:', nearbyPlayers.length);
+            window.dispatchEvent(new CustomEvent('proximity-update', { detail: nearbyPlayers }));
+        }
     }
 
     checkRoomZone() {
