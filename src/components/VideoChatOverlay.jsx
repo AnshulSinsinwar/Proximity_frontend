@@ -1,27 +1,85 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import SocketManager from '../game/SocketManager';
+import WebRTCManager from '../game/WebRTCManager';
 
 const VideoChatOverlay = () => {
     const localVideoRef = useRef(null);
-    const screenVideoRef = useRef(null);
     const [currentRoom, setCurrentRoom] = useState(null);
     const [stream, setStream] = useState(null);
     const [screenStream, setScreenStream] = useState(null);
     const [isMicOn, setIsMicOn] = useState(true);
     const [isCameraOn, setIsCameraOn] = useState(true);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
-    const [peers, setPeers] = useState([]);
+    const [nearbyPeers, setNearbyPeers] = useState([]); // socketIds of nearby players
+    const [remoteStreams, setRemoteStreams] = useState(new Map()); // socketId -> stream
     const [cameraError, setCameraError] = useState(null);
+    const remoteVideoRefs = useRef(new Map()); // socketId -> video element
 
     // Check if we should have media active (in room OR near peers)
-    const shouldHaveMedia = currentRoom || peers.length > 0;
+    const shouldHaveMedia = currentRoom || nearbyPeers.length > 0;
 
-    // Attach stream to video element
-    const attachStream = useCallback((videoEl, mediaStream) => {
-        if (videoEl && mediaStream) {
-            videoEl.srcObject = mediaStream;
-            videoEl.play().catch(e => console.log('Autoplay blocked:', e));
+    // Initialize WebRTC when stream is ready
+    useEffect(() => {
+        if (stream && SocketManager.socket) {
+            WebRTCManager.init(stream, SocketManager);
+
+            // Handle incoming remote streams
+            WebRTCManager.onRemoteStream = (socketId, remoteStream) => {
+                console.log('🎥 Got remote stream from:', socketId);
+                setRemoteStreams(prev => new Map(prev).set(socketId, remoteStream));
+            };
+
+            // Handle peer disconnection
+            WebRTCManager.onPeerDisconnected = (socketId) => {
+                console.log('🔴 Peer disconnected:', socketId);
+                setRemoteStreams(prev => {
+                    const next = new Map(prev);
+                    next.delete(socketId);
+                    return next;
+                });
+            };
         }
-    }, []);
+
+        return () => {
+            WebRTCManager.destroy();
+        };
+    }, [stream]);
+
+    // Connect to nearby peers
+    useEffect(() => {
+        if (!stream || nearbyPeers.length === 0) return;
+
+        // Create connections to new peers
+        nearbyPeers.forEach(peer => {
+            const socketId = peer.socketId || peer;
+            if (!WebRTCManager.isConnected(socketId) && socketId !== SocketManager.socket?.id) {
+                // Only initiator (lower ID) creates offer to prevent both sides creating offers
+                if (SocketManager.socket?.id < socketId) {
+                    console.log('📞 Initiating call to:', socketId);
+                    WebRTCManager.createOffer(socketId);
+                }
+            }
+        });
+
+        // Close connections to peers no longer nearby
+        const nearbyIds = nearbyPeers.map(p => p.socketId || p);
+        WebRTCManager.getConnectedPeers().forEach(connectedId => {
+            if (!nearbyIds.includes(connectedId)) {
+                WebRTCManager.closePeer(connectedId);
+            }
+        });
+    }, [nearbyPeers, stream]);
+
+    // Attach remote streams to video elements
+    useEffect(() => {
+        remoteStreams.forEach((remoteStream, socketId) => {
+            const videoEl = remoteVideoRefs.current.get(socketId);
+            if (videoEl && videoEl.srcObject !== remoteStream) {
+                videoEl.srcObject = remoteStream;
+                videoEl.play().catch(e => console.log('Remote video play error:', e));
+            }
+        });
+    }, [remoteStreams]);
 
     // Start/stop media based on room OR peer proximity
     useEffect(() => {
@@ -39,10 +97,10 @@ const VideoChatOverlay = () => {
                 } catch (err) {
                     console.error("❌ Error accessing media devices:", err);
                     setCameraError(err.name === 'NotAllowedError'
-                        ? 'Camera blocked. Click 🔒 in address bar to allow.'
+                        ? 'Camera blocked. Click 🔒 in address bar.'
                         : err.name === 'NotFoundError'
                             ? 'No camera found'
-                            : 'Camera error: ' + err.message);
+                            : 'Camera error');
                 }
             }
         };
@@ -51,12 +109,13 @@ const VideoChatOverlay = () => {
             if (!shouldHaveMedia && stream) {
                 stream.getTracks().forEach(track => track.stop());
                 setStream(null);
+                WebRTCManager.closeAll();
+                setRemoteStreams(new Map());
                 if (screenStream) {
                     screenStream.getTracks().forEach(track => track.stop());
                     setScreenStream(null);
                     setIsScreenSharing(false);
                 }
-                console.log('📹 Media stopped - no room/peers');
             }
         };
 
@@ -68,19 +127,11 @@ const VideoChatOverlay = () => {
     useEffect(() => {
         if (localVideoRef.current && stream) {
             localVideoRef.current.srcObject = stream;
-            localVideoRef.current.play().catch(e => console.log('Local video autoplay blocked:', e));
+            localVideoRef.current.play().catch(e => console.log('Local video play blocked:', e));
         }
     }, [stream]);
 
-    // Attach screen stream when available
-    useEffect(() => {
-        if (screenVideoRef.current && screenStream) {
-            screenVideoRef.current.srcObject = screenStream;
-            screenVideoRef.current.play().catch(e => console.log('Screen video autoplay blocked:', e));
-        }
-    }, [screenStream]);
-
-    // Listen for room changes from Phaser
+    // Listen for room changes and proximity updates
     useEffect(() => {
         const handleRoomChange = (event) => {
             const { room } = event.detail;
@@ -89,12 +140,22 @@ const VideoChatOverlay = () => {
         };
 
         const handleProximity = (event) => {
-            const nearbyPeers = event.detail;
-            setPeers(nearbyPeers);
+            const peers = event.detail || [];
+            console.log('👥 Nearby peers:', peers.length);
+            setNearbyPeers(peers);
+        };
+
+        // Listen for user-joined to get socket IDs
+        const handleUserJoined = (data) => {
+            console.log('👤 User joined:', data);
         };
 
         window.addEventListener('room-change', handleRoomChange);
         window.addEventListener('proximity-update', handleProximity);
+
+        if (SocketManager.socket) {
+            SocketManager.socket.on('new-user-joined', handleUserJoined);
+        }
 
         return () => {
             window.removeEventListener('room-change', handleRoomChange);
@@ -102,11 +163,8 @@ const VideoChatOverlay = () => {
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
-            if (screenStream) {
-                screenStream.getTracks().forEach(track => track.stop());
-            }
         };
-    }, [stream, screenStream]);
+    }, [stream]);
 
     // Toggle microphone
     const toggleMic = () => {
@@ -130,7 +188,7 @@ const VideoChatOverlay = () => {
         }
     };
 
-    // Retry camera access
+    // Request camera access
     const retryCamera = async () => {
         setCameraError(null);
         try {
@@ -155,15 +213,12 @@ const VideoChatOverlay = () => {
         } else {
             try {
                 const displayStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: {
-                        cursor: 'always'
-                    },
+                    video: { cursor: 'always' },
                     audio: false
                 });
                 setScreenStream(displayStream);
                 setIsScreenSharing(true);
 
-                // Listen for when user stops sharing via browser UI
                 displayStream.getVideoTracks()[0].onended = () => {
                     setScreenStream(null);
                     setIsScreenSharing(false);
@@ -185,20 +240,21 @@ const VideoChatOverlay = () => {
             <div style={styles.roomBanner}>
                 {currentRoom
                     ? `📍 ${currentRoom.replace('_', ' ')}`
-                    : `👥 ${peers.length} nearby`}
+                    : `👥 ${nearbyPeers.length} nearby`}
+                {remoteStreams.size > 0 && ` • 🎥 ${remoteStreams.size} connected`}
             </div>
 
             {/* Video Grid */}
             <div style={styles.videoGrid}>
-                {/* Screen Share Video */}
+                {/* Screen Share (if sharing) */}
                 {isScreenSharing && screenStream && (
                     <div style={styles.screenCard}>
                         <video
-                            ref={screenVideoRef}
                             autoPlay
                             playsInline
                             muted
                             style={styles.screenVideo}
+                            ref={(el) => { if (el) el.srcObject = screenStream; }}
                         />
                         <div style={styles.videoLabel}>🖥️ Your Screen</div>
                     </div>
@@ -227,17 +283,49 @@ const VideoChatOverlay = () => {
                     <div style={styles.videoLabel}>You</div>
                 </div>
 
-                {/* Peer Videos */}
-                {peers.map(peerId => (
-                    <div key={peerId} style={styles.videoCard}>
-                        <div style={styles.peerPlaceholder}>
-                            <span style={{ fontSize: '32px' }}>👤</span>
-                        </div>
+                {/* Remote Videos */}
+                {Array.from(remoteStreams.entries()).map(([socketId, remoteStream]) => (
+                    <div key={socketId} style={styles.videoCard}>
+                        <video
+                            ref={el => {
+                                if (el) {
+                                    remoteVideoRefs.current.set(socketId, el);
+                                    if (el.srcObject !== remoteStream) {
+                                        el.srcObject = remoteStream;
+                                        el.play().catch(e => console.log('Play error:', e));
+                                    }
+                                }
+                            }}
+                            autoPlay
+                            playsInline
+                            style={styles.video}
+                        />
                         <div style={styles.videoLabel}>
-                            {typeof peerId === 'string' ? peerId.substring(0, 8) + '...' : 'Peer'}
+                            {socketId.substring(0, 8)}...
                         </div>
                     </div>
                 ))}
+
+                {/* Placeholder for peers without streams yet */}
+                {nearbyPeers
+                    .filter(peer => {
+                        const id = peer.socketId || peer;
+                        return id !== SocketManager.socket?.id && !remoteStreams.has(id);
+                    })
+                    .map(peer => {
+                        const id = peer.socketId || peer;
+                        return (
+                            <div key={id} style={styles.videoCard}>
+                                <div style={styles.peerPlaceholder}>
+                                    <span style={{ fontSize: '20px' }}>⏳</span>
+                                    <div style={{ fontSize: '10px', marginTop: '5px' }}>Connecting...</div>
+                                </div>
+                                <div style={styles.videoLabel}>
+                                    {typeof id === 'string' ? id.substring(0, 8) + '...' : 'Peer'}
+                                </div>
+                            </div>
+                        );
+                    })}
             </div>
 
             {/* Media Controls */}
@@ -319,7 +407,7 @@ const styles = {
         gap: '10px',
         flexWrap: 'wrap',
         justifyContent: 'flex-end',
-        maxWidth: '600px',
+        maxWidth: '700px',
     },
     videoCard: {
         background: '#1a1a2e',
@@ -355,8 +443,10 @@ const styles = {
         background: '#2d2d44',
         borderRadius: '8px',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        color: 'rgba(255,255,255,0.6)',
     },
     errorBox: {
         width: '100%',
