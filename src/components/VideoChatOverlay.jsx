@@ -173,6 +173,8 @@ const VideoChatOverlay = () => {
             if (audioTrack) {
                 audioTrack.enabled = !audioTrack.enabled;
                 setIsMicOn(audioTrack.enabled);
+                // Sync with WebRTC peers
+                WebRTCManager.updateTrackEnabled('audio', audioTrack.enabled);
             }
         }
     };
@@ -184,6 +186,8 @@ const VideoChatOverlay = () => {
             if (videoTrack) {
                 videoTrack.enabled = !videoTrack.enabled;
                 setIsCameraOn(videoTrack.enabled);
+                // Sync with WebRTC peers
+                WebRTCManager.updateTrackEnabled('video', videoTrack.enabled);
             }
         }
     };
@@ -205,11 +209,20 @@ const VideoChatOverlay = () => {
     // Toggle screen share
     const toggleScreenShare = async () => {
         if (isScreenSharing) {
+            // Stop screen sharing, restore camera
             if (screenStream) {
                 screenStream.getTracks().forEach(track => track.stop());
                 setScreenStream(null);
             }
             setIsScreenSharing(false);
+            
+            // Replace back to camera track
+            if (stream) {
+                const cameraTrack = stream.getVideoTracks()[0];
+                if (cameraTrack) {
+                    await WebRTCManager.replaceVideoTrack(cameraTrack);
+                }
+            }
         } else {
             try {
                 const displayStream = await navigator.mediaDevices.getDisplayMedia({
@@ -219,9 +232,21 @@ const VideoChatOverlay = () => {
                 setScreenStream(displayStream);
                 setIsScreenSharing(true);
 
-                displayStream.getVideoTracks()[0].onended = () => {
+                // Replace camera track with screen track for all peers
+                const screenTrack = displayStream.getVideoTracks()[0];
+                await WebRTCManager.replaceVideoTrack(screenTrack);
+
+                // Handle when user stops sharing via browser UI
+                screenTrack.onended = async () => {
                     setScreenStream(null);
                     setIsScreenSharing(false);
+                    // Restore camera
+                    if (stream) {
+                        const cameraTrack = stream.getVideoTracks()[0];
+                        if (cameraTrack) {
+                            await WebRTCManager.replaceVideoTrack(cameraTrack);
+                        }
+                    }
                 };
             } catch (err) {
                 console.error("❌ Error sharing screen:", err);

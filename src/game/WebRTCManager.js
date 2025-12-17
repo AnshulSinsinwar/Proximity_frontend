@@ -3,28 +3,22 @@
  * Handles peer-to-peer video connections using WebRTC
  */
 
-// Free STUN servers for NAT traversal (multiple for reliability)
+// Free STUN servers for NAT traversal
 const ICE_SERVERS = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    { urls: 'stun:stun4.l.google.com:19302' },
 ];
-
-// Retry settings
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 2000;
 
 class WebRTCManager {
     constructor() {
-        this.peers = new Map(); // socketId -> { connection, stream, retries }
+        this.peers = new Map(); // socketId -> { connection, stream, senders }
         this.localStream = null;
-        this.onRemoteStream = null; // Callback when remote stream received
-        this.onPeerDisconnected = null; // Callback when peer disconnects
-        this.onConnectionStateChange = null; // Callback for connection state
+        this.onRemoteStream = null;
+        this.onPeerDisconnected = null;
         this.socketManager = null;
-        this.pendingCandidates = new Map(); // Store ICE candidates before connection is ready
+        this.pendingCandidates = new Map();
+        this.isNegotiating = new Map(); // Prevent negotiation collision
     }
 
     /**
@@ -34,90 +28,69 @@ class WebRTCManager {
         this.localStream = localStream;
         this.socketManager = socketManager;
 
-        // Listen for incoming signals
         if (socketManager && socketManager.socket) {
-            // Remove existing listeners first to prevent duplicates
+            // Remove existing listeners first
             socketManager.socket.off('receive-signal');
             socketManager.socket.off('close-peer');
-            
+
             socketManager.socket.on('receive-signal', this.handleReceiveSignal.bind(this));
             socketManager.socket.on('close-peer', this.handleClosePeer.bind(this));
         }
 
-        console.log('🎥 WebRTC Manager initialized with', this.localStream?.getTracks().length, 'tracks');
+        console.log('🎥 WebRTC Manager initialized');
     }
 
     /**
      * Create a peer connection and send offer (caller)
      */
-    async createOffer(targetSocketId, retryCount = 0) {
+    async createOffer(targetSocketId) {
+        // Don't create if already exists and connected
         if (this.peers.has(targetSocketId)) {
             const peer = this.peers.get(targetSocketId);
-            if (peer.connection.connectionState === 'connected') {
-                console.log('Already connected to', targetSocketId);
+            const state = peer.connection.connectionState;
+            if (state === 'connected' || state === 'connecting') {
                 return;
             }
-            // Close failed connection before retry
+            // Close broken connection
             this.closePeer(targetSocketId, false);
         }
 
-        console.log('📞 Creating offer for:', targetSocketId, retryCount > 0 ? `(retry ${retryCount})` : '');
+        // Check if already negotiating
+        if (this.isNegotiating.get(targetSocketId)) {
+            console.log('⏳ Already negotiating with', targetSocketId);
+            return;
+        }
+        this.isNegotiating.set(targetSocketId, true);
+
+        console.log('📞 Creating offer for:', targetSocketId.substring(0, 8) + '...');
 
         const connection = this.createPeerConnection(targetSocketId);
-        
+
         try {
             const offer = await connection.createOffer({
                 offerToReceiveAudio: true,
                 offerToReceiveVideo: true
             });
+
+            // Check state before setting
+            if (connection.signalingState !== 'stable') {
+                console.log('⚠️ Connection not stable, skipping offer');
+                this.isNegotiating.set(targetSocketId, false);
+                return;
+            }
+
             await connection.setLocalDescription(offer);
 
-            // Wait for ICE gathering to complete or timeout
-            await this.waitForIceGathering(connection, 3000);
-
-            // Send offer via signaling server
             this.sendSignal(targetSocketId, {
                 type: 'offer',
                 sdp: connection.localDescription
             });
 
-            // Store retry count
-            const peer = this.peers.get(targetSocketId);
-            if (peer) peer.retries = retryCount;
-
         } catch (err) {
             console.error('Failed to create offer:', err);
-            
-            // Retry on failure
-            if (retryCount < MAX_RETRIES) {
-                setTimeout(() => {
-                    this.createOffer(targetSocketId, retryCount + 1);
-                }, RETRY_DELAY);
-            }
+        } finally {
+            this.isNegotiating.set(targetSocketId, false);
         }
-    }
-
-    /**
-     * Wait for ICE gathering to complete
-     */
-    waitForIceGathering(connection, timeout = 3000) {
-        return new Promise((resolve) => {
-            if (connection.iceGatheringState === 'complete') {
-                resolve();
-                return;
-            }
-
-            const timer = setTimeout(() => {
-                resolve(); // Proceed anyway after timeout
-            }, timeout);
-
-            connection.onicegatheringstatechange = () => {
-                if (connection.iceGatheringState === 'complete') {
-                    clearTimeout(timer);
-                    resolve();
-                }
-            };
-        });
     }
 
     /**
@@ -125,39 +98,37 @@ class WebRTCManager {
      */
     async handleReceiveSignal(data) {
         const { fromUserId, signal } = data;
-        console.log('📨 Received signal from:', fromUserId, signal.type || 'ice-candidate');
 
         let peer = this.peers.get(fromUserId);
         let connection = peer?.connection;
 
-        // If we don't have a connection yet, create one (we're the callee)
-        if (!connection && signal.type === 'offer') {
-            connection = this.createPeerConnection(fromUserId);
-        }
-
-        if (!connection) {
-            // Store ICE candidate for later
-            if (signal.type === 'ice-candidate' && signal.candidate) {
-                if (!this.pendingCandidates.has(fromUserId)) {
-                    this.pendingCandidates.set(fromUserId, []);
-                }
-                this.pendingCandidates.get(fromUserId).push(signal.candidate);
-            }
-            return;
-        }
-
         try {
             if (signal.type === 'offer') {
+                console.log('📨 Received offer from:', fromUserId.substring(0, 8) + '...');
+
+                // If we already have a connection, handle collision
+                if (connection) {
+                    const isPolite = this.socketManager.socket?.id > fromUserId;
+
+                    if (!isPolite && connection.signalingState !== 'stable') {
+                        console.log('🔄 Ignoring offer - we are impolite and already negotiating');
+                        return;
+                    }
+
+                    // Close existing and recreate
+                    this.closePeer(fromUserId, false);
+                }
+
+                // Create new connection
+                connection = this.createPeerConnection(fromUserId);
+
                 await connection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-                
+
                 // Apply pending ICE candidates
                 await this.applyPendingCandidates(fromUserId, connection);
-                
+
                 const answer = await connection.createAnswer();
                 await connection.setLocalDescription(answer);
-
-                // Wait for ICE gathering
-                await this.waitForIceGathering(connection, 3000);
 
                 this.sendSignal(fromUserId, {
                     type: 'answer',
@@ -165,14 +136,23 @@ class WebRTCManager {
                 });
 
             } else if (signal.type === 'answer') {
+                console.log('📨 Received answer from:', fromUserId.substring(0, 8) + '...');
+
+                if (!connection) {
+                    console.warn('No connection for answer');
+                    return;
+                }
+
+                // Only set if we're expecting an answer
                 if (connection.signalingState === 'have-local-offer') {
                     await connection.setRemoteDescription(new RTCSessionDescription(signal.sdp));
-                    // Apply pending ICE candidates
                     await this.applyPendingCandidates(fromUserId, connection);
+                } else {
+                    console.log('⚠️ Ignoring answer - wrong state:', connection.signalingState);
                 }
 
             } else if (signal.candidate) {
-                if (connection.remoteDescription) {
+                if (connection && connection.remoteDescription) {
                     await connection.addIceCandidate(new RTCIceCandidate(signal.candidate));
                 } else {
                     // Store for later
@@ -183,7 +163,7 @@ class WebRTCManager {
                 }
             }
         } catch (err) {
-            console.error('Error handling signal:', err);
+            console.error('Error handling signal:', err.message);
         }
     }
 
@@ -195,9 +175,7 @@ class WebRTCManager {
         for (const candidate of candidates) {
             try {
                 await connection.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch (e) {
-                console.warn('Failed to add pending ICE candidate:', e);
-            }
+            } catch (e) { }
         }
         this.pendingCandidates.delete(peerId);
     }
@@ -206,19 +184,18 @@ class WebRTCManager {
      * Create RTCPeerConnection with event handlers
      */
     createPeerConnection(targetSocketId) {
-        const connection = new RTCPeerConnection({ 
-            iceServers: ICE_SERVERS,
-            iceCandidatePoolSize: 10
-        });
+        const connection = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        const senders = [];
 
         // Add local stream tracks
         if (this.localStream) {
             this.localStream.getTracks().forEach(track => {
-                connection.addTrack(track, this.localStream);
+                const sender = connection.addTrack(track, this.localStream);
+                senders.push(sender);
             });
         }
 
-        // Handle ICE candidates - send as they're gathered
+        // Handle ICE candidates
         connection.onicecandidate = (event) => {
             if (event.candidate) {
                 this.sendSignal(targetSocketId, {
@@ -230,16 +207,14 @@ class WebRTCManager {
 
         // Handle incoming stream
         connection.ontrack = (event) => {
-            console.log('🎥 Remote stream received from:', targetSocketId);
+            console.log('🎥 Remote stream received from:', targetSocketId.substring(0, 8) + '...');
             const remoteStream = event.streams[0];
-            
-            // Update peer data
+
             const peer = this.peers.get(targetSocketId);
             if (peer) {
                 peer.stream = remoteStream;
             }
 
-            // Notify callback
             if (this.onRemoteStream) {
                 this.onRemoteStream(targetSocketId, remoteStream);
             }
@@ -248,37 +223,50 @@ class WebRTCManager {
         // Handle connection state changes
         connection.onconnectionstatechange = () => {
             const state = connection.connectionState;
-            console.log(`🔗 Connection state (${targetSocketId.substring(0,8)}...):`, state);
-            
-            if (this.onConnectionStateChange) {
-                this.onConnectionStateChange(targetSocketId, state);
-            }
+            console.log(`🔗 Connection (${targetSocketId.substring(0, 8)}...):`, state);
 
-            if (state === 'failed') {
-                // Retry connection
-                const peer = this.peers.get(targetSocketId);
-                const retries = peer?.retries || 0;
-                if (retries < MAX_RETRIES) {
-                    console.log('🔄 Retrying connection...');
-                    this.closePeer(targetSocketId, false);
-                    setTimeout(() => {
-                        this.createOffer(targetSocketId, retries + 1);
-                    }, RETRY_DELAY);
-                }
-            } else if (state === 'disconnected' || state === 'closed') {
+            if (state === 'connected') {
+                console.log('✅ Peer connected:', targetSocketId.substring(0, 8) + '...');
+            } else if (state === 'failed' || state === 'disconnected' || state === 'closed') {
                 this.closePeer(targetSocketId, false);
             }
         };
 
-        // Handle ICE connection state
-        connection.oniceconnectionstatechange = () => {
-            console.log(`🧊 ICE state (${targetSocketId.substring(0,8)}...):`, connection.iceConnectionState);
-        };
-
-        // Store peer
-        this.peers.set(targetSocketId, { connection, stream: null, retries: 0 });
+        // Store peer with senders for track replacement
+        this.peers.set(targetSocketId, { connection, stream: null, senders });
 
         return connection;
+    }
+
+    /**
+     * Replace video track (for screen sharing)
+     */
+    async replaceVideoTrack(newVideoTrack) {
+        for (const [socketId, peer] of this.peers) {
+            const videoSender = peer.senders.find(s => s.track?.kind === 'video');
+            if (videoSender && newVideoTrack) {
+                try {
+                    await videoSender.replaceTrack(newVideoTrack);
+                    console.log('🔄 Replaced video track for:', socketId.substring(0, 8) + '...');
+                } catch (err) {
+                    console.error('Failed to replace track:', err);
+                }
+            }
+        }
+    }
+
+    /**
+     * Update track enabled state (for mute/camera toggle)
+     */
+    updateTrackEnabled(kind, enabled) {
+        if (this.localStream) {
+            const tracks = kind === 'audio'
+                ? this.localStream.getAudioTracks()
+                : this.localStream.getVideoTracks();
+            tracks.forEach(track => {
+                track.enabled = enabled;
+            });
+        }
     }
 
     /**
@@ -298,7 +286,6 @@ class WebRTCManager {
      */
     handleClosePeer(data) {
         const { fromUserId } = data;
-        console.log('📴 Peer close signal from:', fromUserId);
         this.closePeer(fromUserId, false);
     }
 
@@ -308,77 +295,53 @@ class WebRTCManager {
     closePeer(targetSocketId, notifyRemote = true) {
         const peer = this.peers.get(targetSocketId);
         if (peer) {
-            try {
-                peer.connection.close();
-            } catch (e) {}
+            try { peer.connection.close(); } catch (e) { }
             this.peers.delete(targetSocketId);
             this.pendingCandidates.delete(targetSocketId);
-            
+            this.isNegotiating.delete(targetSocketId);
+
             if (this.onPeerDisconnected) {
                 this.onPeerDisconnected(targetSocketId);
             }
 
-            // Notify remote peer
-            if (notifyRemote && this.socketManager && this.socketManager.socket) {
+            if (notifyRemote && this.socketManager?.socket) {
                 this.socketManager.socket.emit('close-peer', { targetSocketId });
             }
 
-            console.log('🔴 Closed peer connection:', targetSocketId.substring(0,8) + '...');
+            console.log('🔴 Closed peer:', targetSocketId.substring(0, 8) + '...');
         }
     }
 
-    /**
-     * Close all peer connections
-     */
     closeAll() {
-        this.peers.forEach((peer, socketId) => {
-            this.closePeer(socketId, true);
-        });
+        this.peers.forEach((_, socketId) => this.closePeer(socketId, true));
     }
 
-    /**
-     * Get all connected peer socket IDs
-     */
     getConnectedPeers() {
         return Array.from(this.peers.keys());
     }
 
-    /**
-     * Check if connected to a specific peer
-     */
     isConnected(socketId) {
         const peer = this.peers.get(socketId);
-        return peer && peer.connection.connectionState === 'connected';
+        return peer?.connection.connectionState === 'connected';
     }
 
-    /**
-     * Check if a peer connection exists (even if not fully connected)
-     */
     hasPeer(socketId) {
         return this.peers.has(socketId);
     }
 
-    /**
-     * Get remote stream for a peer
-     */
     getRemoteStream(socketId) {
         return this.peers.get(socketId)?.stream || null;
     }
 
-    /**
-     * Cleanup
-     */
     destroy() {
         this.closeAll();
-        if (this.socketManager && this.socketManager.socket) {
+        if (this.socketManager?.socket) {
             this.socketManager.socket.off('receive-signal');
             this.socketManager.socket.off('close-peer');
         }
         this.localStream = null;
         this.socketManager = null;
-        console.log('🎥 WebRTC Manager destroyed');
     }
 }
 
-// Export singleton instance
 export default new WebRTCManager();
