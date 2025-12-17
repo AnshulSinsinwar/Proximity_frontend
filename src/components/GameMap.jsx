@@ -59,6 +59,9 @@ const GameMap = ({
 
         gameRef.current = new Phaser.Game(config);
 
+        // Expose game globally so overlays can disable keyboard input
+        window.PHASER_GAME = gameRef.current;
+
         // Listen for kanban zone events from Phaser
         const handleKanbanZone = (event) => {
             setShowKanban(event.detail.inZone);
@@ -73,6 +76,7 @@ const GameMap = ({
             }
             delete window.PLAYER_DATA;
             delete window.ROOM_DATA;
+            delete window.PHASER_GAME;
         };
     }, [playerName, avatarFile, avatarId, roomCode, roomName, token, isCreator, spawn]);
 
@@ -81,12 +85,22 @@ const GameMap = ({
             {/* Game Canvas - lower z-index */}
             <div ref={gameContainerRef} style={styles.gameCanvas} />
 
-            {/* UI Overlays Layer - higher z-index */}
-
             {/* Room Info Banner */}
             <div style={styles.roomBanner}>
                 🏠 {roomName || 'Room'} • Code: <strong>{roomCode || 'N/A'}</strong>
             </div>
+
+            {/* Kanban Toggle Button - Top Right */}
+            <button
+                onClick={() => setShowKanban(!showKanban)}
+                style={{
+                    ...styles.kanbanBtn,
+                    background: showKanban ? '#27ae60' : 'rgba(74, 144, 217, 0.9)'
+                }}
+                title="Open Kanban Board"
+            >
+                📋
+            </button>
 
             {/* Video Chat Overlay */}
             <VideoChatOverlay />
@@ -142,7 +156,24 @@ const styles = {
         boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
         zIndex: 9999,
         border: '1px solid rgba(255,255,255,0.15)',
-    }
+    },
+    kanbanBtn: {
+        position: 'absolute',
+        top: '15px',
+        right: '20px',
+        width: '50px',
+        height: '50px',
+        borderRadius: '50%',
+        border: 'none',
+        cursor: 'pointer',
+        fontSize: '22px',
+        boxShadow: '0 4px 15px rgba(0,0,0,0.4)',
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'transform 0.2s, background 0.2s',
+    },
 };
 
 export default GameMap;

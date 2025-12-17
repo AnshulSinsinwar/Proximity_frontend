@@ -16,7 +16,19 @@ const LogoutButton = ({ token, isCreator, roomCode, username, onLogout }) => {
             setShowMenu(false);
         } catch (err) {
             console.error('Failed to logout:', err);
-            onLogout(); // Still logout on error
+            // If user/session not found (404), still allow logout - session expired
+            if (err.status === 404) {
+                setWorkTimeData({
+                    username: username || 'User',
+                    roomCode: roomCode || 'N/A',
+                    workTime: { displayText: 'Session expired' }
+                });
+                setShowWorkTime(true);
+                setShowMenu(false);
+            } else {
+                // For other errors, just logout directly
+                onLogout();
+            }
         } finally {
             setLoading(false);
         }
@@ -32,6 +44,11 @@ const LogoutButton = ({ token, isCreator, roomCode, username, onLogout }) => {
             onLogout();
         } catch (err) {
             console.error('Failed to abolish room:', err);
+            // If room already gone (404), just logout
+            if (err.status === 404) {
+                alert('Room already expired or closed.');
+                onLogout();
+            }
         } finally {
             setLoading(false);
         }

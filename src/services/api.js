@@ -8,14 +8,22 @@ console.log('🌐 API Base URL:', BASE_URL);
 async function apiCall(endpoint, options = {}) {
     const url = `${BASE_URL}${endpoint}`;
     console.log('📡 API Request:', options.method || 'GET', url);
-
-    const config = {
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-        },
-        ...options,
+    
+    // Merge headers properly - don't let options.headers overwrite Content-Type
+    const headers = {
+        'Content-Type': 'application/json',
+        ...options.headers,
     };
+    
+    const config = {
+        ...options,
+        headers,
+    };
+    
+    // Log the body being sent
+    if (config.body) {
+        console.log('📦 Request Body:', config.body);
+    }
 
     try {
         const response = await fetch(url, config);
@@ -117,10 +125,11 @@ export async function getTasks(roomCode) {
 
 // Create a new task
 export async function createTask(roomCode, title, description, token) {
+    console.log('📝 Creating task:', { roomCode, title, description });
     return apiCall(`/rooms/${roomCode}/tasks`, {
         method: 'POST',
         body: JSON.stringify({ title, description }),
-        ...withAuth(token),
+        headers: { Authorization: `Bearer ${token}` },
     });
 }
 
@@ -129,7 +138,7 @@ export async function updateTask(taskId, updates, token) {
     return apiCall(`/tasks/${taskId}`, {
         method: 'PATCH',
         body: JSON.stringify(updates),
-        ...withAuth(token),
+        headers: { Authorization: `Bearer ${token}` },
     });
 }
 
@@ -137,7 +146,7 @@ export async function updateTask(taskId, updates, token) {
 export async function deleteTask(taskId, token) {
     return apiCall(`/tasks/${taskId}`, {
         method: 'DELETE',
-        ...withAuth(token),
+        headers: { Authorization: `Bearer ${token}` },
     });
 }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 
 const VideoChatOverlay = () => {
     const localVideoRef = useRef(null);
@@ -15,6 +15,14 @@ const VideoChatOverlay = () => {
     // Check if we should have media active (in room OR near peers)
     const shouldHaveMedia = currentRoom || peers.length > 0;
 
+    // Attach stream to video element
+    const attachStream = useCallback((videoEl, mediaStream) => {
+        if (videoEl && mediaStream) {
+            videoEl.srcObject = mediaStream;
+            videoEl.play().catch(e => console.log('Autoplay blocked:', e));
+        }
+    }, []);
+
     // Start/stop media based on room OR peer proximity
     useEffect(() => {
         const startMedia = async () => {
@@ -27,19 +35,14 @@ const VideoChatOverlay = () => {
                     });
                     setStream(mediaStream);
                     setCameraError(null);
-                    
-                    if (localVideoRef.current) {
-                        localVideoRef.current.srcObject = mediaStream;
-                        localVideoRef.current.play().catch(e => console.log('Video autoplay blocked:', e));
-                    }
                     console.log('✅ Camera/mic started');
                 } catch (err) {
                     console.error("❌ Error accessing media devices:", err);
-                    setCameraError(err.name === 'NotAllowedError' 
+                    setCameraError(err.name === 'NotAllowedError'
                         ? 'Camera blocked. Click 🔒 in address bar to allow.'
                         : err.name === 'NotFoundError'
-                        ? 'No camera found'
-                        : 'Camera error: ' + err.message);
+                            ? 'No camera found'
+                            : 'Camera error: ' + err.message);
                 }
             }
         };
@@ -48,9 +51,6 @@ const VideoChatOverlay = () => {
             if (!shouldHaveMedia && stream) {
                 stream.getTracks().forEach(track => track.stop());
                 setStream(null);
-                if (localVideoRef.current) {
-                    localVideoRef.current.srcObject = null;
-                }
                 if (screenStream) {
                     screenStream.getTracks().forEach(track => track.stop());
                     setScreenStream(null);
@@ -64,6 +64,22 @@ const VideoChatOverlay = () => {
         stopMedia();
     }, [shouldHaveMedia, stream, screenStream]);
 
+    // Attach local video stream when available
+    useEffect(() => {
+        if (localVideoRef.current && stream) {
+            localVideoRef.current.srcObject = stream;
+            localVideoRef.current.play().catch(e => console.log('Local video autoplay blocked:', e));
+        }
+    }, [stream]);
+
+    // Attach screen stream when available
+    useEffect(() => {
+        if (screenVideoRef.current && screenStream) {
+            screenVideoRef.current.srcObject = screenStream;
+            screenVideoRef.current.play().catch(e => console.log('Screen video autoplay blocked:', e));
+        }
+    }, [screenStream]);
+
     // Listen for room changes from Phaser
     useEffect(() => {
         const handleRoomChange = (event) => {
@@ -74,7 +90,6 @@ const VideoChatOverlay = () => {
 
         const handleProximity = (event) => {
             const nearbyPeers = event.detail;
-            console.log('👥 Nearby peers:', nearbyPeers.length);
             setPeers(nearbyPeers);
         };
 
@@ -124,10 +139,6 @@ const VideoChatOverlay = () => {
                 audio: true
             });
             setStream(mediaStream);
-            if (localVideoRef.current) {
-                localVideoRef.current.srcObject = mediaStream;
-                localVideoRef.current.play().catch(e => console.log('Play error:', e));
-            }
         } catch (err) {
             setCameraError('Camera access denied');
         }
@@ -144,12 +155,15 @@ const VideoChatOverlay = () => {
         } else {
             try {
                 const displayStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: true,
+                    video: {
+                        cursor: 'always'
+                    },
                     audio: false
                 });
                 setScreenStream(displayStream);
                 setIsScreenSharing(true);
 
+                // Listen for when user stops sharing via browser UI
                 displayStream.getVideoTracks()[0].onended = () => {
                     setScreenStream(null);
                     setIsScreenSharing(false);
@@ -169,8 +183,8 @@ const VideoChatOverlay = () => {
         <div style={styles.container}>
             {/* Status Banner */}
             <div style={styles.roomBanner}>
-                {currentRoom 
-                    ? `📍 ${currentRoom.replace('_', ' ')}` 
+                {currentRoom
+                    ? `📍 ${currentRoom.replace('_', ' ')}`
                     : `👥 ${peers.length} nearby`}
             </div>
 
@@ -180,10 +194,11 @@ const VideoChatOverlay = () => {
                 {isScreenSharing && screenStream && (
                     <div style={styles.screenCard}>
                         <video
+                            ref={screenVideoRef}
                             autoPlay
                             playsInline
+                            muted
                             style={styles.screenVideo}
-                            ref={(el) => { if (el) el.srcObject = screenStream; }}
                         />
                         <div style={styles.videoLabel}>🖥️ Your Screen</div>
                     </div>

@@ -371,24 +371,24 @@ export default class MainScene extends Phaser.Scene {
         let moved = false;
         let direction = '';
 
-        if (this.cursors.left.isDown || this.wasd.left.isDown) {
+        if (this.cursors.left.isDown) {
             this.player.setVelocityX(-speed);
             this.player.anims.play('avatar-walk-left', true);
             direction = 'left';
             moved = true;
-        } else if (this.cursors.right.isDown || this.wasd.right.isDown) {
+        } else if (this.cursors.right.isDown) {
             this.player.setVelocityX(speed);
             this.player.anims.play('avatar-walk-right', true);
             direction = 'right';
             moved = true;
         }
 
-        if (this.cursors.up.isDown || this.wasd.up.isDown) {
+        if (this.cursors.up.isDown) {
             this.player.setVelocityY(-speed);
             this.player.anims.play('avatar-walk-up', true);
             direction = 'up';
             moved = true;
-        } else if (this.cursors.down.isDown || this.wasd.down.isDown) {
+        } else if (this.cursors.down.isDown) {
             this.player.setVelocityY(speed);
             this.player.anims.play('avatar-walk-down', true);
             direction = 'down';
