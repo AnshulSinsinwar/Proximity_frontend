@@ -1,6 +1,6 @@
 // API Service for Proximity Backend
 // Default: deployed backend. Override with VITE_API_URL env variable
-const BASE_URL = import.meta.env.VITE_API_URL || 'https://proximity-backend-phjg.onrender.com/api/v1';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
 console.log('🌐 API Base URL:', BASE_URL);
 

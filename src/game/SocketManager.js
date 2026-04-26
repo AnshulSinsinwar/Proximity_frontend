@@ -1,7 +1,7 @@
 import io from 'socket.io-client';
 
 // Socket server URL - default: deployed backend. Override with VITE_SOCKET_URL
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://proximity-backend-phjg.onrender.com';
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
 
 console.log('🔌 Socket URL:', SOCKET_URL);
 
